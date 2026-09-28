@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JS Space Evasion Game</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;padding:18px 12px;background:radial-gradient(circle,#0a0a28,#020208);color:white;font-family:"Courier New",monospace;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow-x:hidden;user-select:none}
+h1{margin:0 0 12px;font-size:clamp(24px,6vw,36px);letter-spacing:4px;text-align:center;color:#00ffff;text-shadow:0 0 12px #00ffff;animation:pulse 2s infinite alternate}
+@keyframes pulse{from{text-shadow:0 0 8px #00ffff}to{text-shadow:0 0 25px #00ffff}}
+#scoreBoard{display:flex;justify-content:space-between;gap:28px;width:min(500px,94vw);margin-bottom:12px;font-size:clamp(14px,4vw,20px);font-weight:bold;color:#00ffcc}
+.high-score{color:#ffaa00}
+canvas{display:block;width:min(500px,94vw);height:auto;aspect-ratio:5/6;background:#000003;border:3px solid #3d3d7a;border-radius:8px;box-shadow:0 0 30px rgba(0,255,255,.2)}
+.controls-container{width:min(500px,94vw);margin-top:15px;display:flex;justify-content:center;align-items:center;gap:10px;flex-wrap:wrap}
+button{padding:12px 18px;min-width:90px;font-family:inherit;font-weight:bold;font-size:14px;color:#00ffff;background:#090921;border:2px solid #00ffff;border-radius:6px;cursor:pointer;transition:.15s;touch-action:none}
+button:hover{background:#00ffff;color:#050515;box-shadow:0 0 16px #00ffff}
+button:active{transform:scale(.96)}
+#startBtn{color:#00ffcc;border-color:#00ffcc}#startBtn:hover{background:#00ffcc}
+#pauseBtn{color:#ffaa00;border-color:#ffaa00}#pauseBtn:hover{background:#ffaa00}
+#restartBtn{color:#ff3366;border-color:#ff3366}#restartBtn:hover{background:#ff3366}
+.move-btn{min-width:105px;font-size:17px}
+.instructions{max-width:500px;margin-top:14px;text-align:center;color:#777799;font-size:12px;line-height:1.7}
+[hidden]{display:none!important}
+@media(max-width:380px){.controls-container{gap:7px}button{padding:11px 12px;min-width:80px;font-size:12px}.move-btn{min-width:100px;font-size:15px}}
+</style>
+</head>
+<body>
+<h1>SPACE EVASION</h1>
+<div id="scoreBoard"><div>SCORE: <span id="score">0</span></div><div class="high-score">BEST: <span id="highScore">0</span></div></div>
+<canvas id="gameCanvas" width="500" height="600">Your browser does not support canvas.</canvas>
+<div class="controls-container">
+<button id="pauseBtn" hidden>PAUSE</button><button id="startBtn">START GAME</button><button id="restartBtn" hidden>RESTART</button><button id="leftBtn" class="move-btn" hidden>◀ LEFT</button><button id="rightBtn" class="move-btn" hidden>RIGHT ▶</button>
+</div>
+<div class="instructions">Use LEFT / RIGHT arrow keys or touchscreen controls to dodge.<br>Press P to pause or resume. Press ENTER to restart after game over.</div>
+<script>
+"use strict";
+const canvas=document.getElementById("gameCanvas"),ctx=canvas.getContext("2d");
+const scoreElement=document.getElementById("score"),highScoreElement=document.getElementById("highScore");
+const startBtn=document.getElementById("startBtn"),pauseBtn=document.getElementById("pauseBtn"),restartBtn=document.getElementById("restartBtn"),leftBtn=document.getElementById("leftBtn"),rightBtn=document.getElementById("rightBtn");
+const WIDTH=canvas.width,HEIGHT=canvas.height;
+let state="menu",score=0,highScore=0;
+try{highScore=Number(localStorage.getItem("spaceEvasionHighScore"))||0}catch(error){highScore=0}
+highScoreElement.textContent=highScore;
+const player={x:WIDTH/2-20,y:HEIGHT-65,width:40,height:40,speed:6};
+const keys={left:false,right:false};
+let obstacles=[],spawnTimer=0,spawnInterval=38,obstacleSpeed=4.2;
+const stars=Array.from({length:75},()=>({x:Math.random()*WIDTH,y:Math.random()*HEIGHT,size:Math.random()*2+.5,speed:Math.random()*2+1}));
+let audioCtx=null,musicTimer=null,noteIndex=0;
+const melody=[110,147,165,147,110,196,165,220,110,147,165,147,294,220,196,165];
+function initAudio(){if(!audioCtx){const AC=window.AudioContext||window.webkitAudioContext;if(AC)audioCtx=new AC()}if(audioCtx&&audioCtx.state==="suspended")audioCtx.resume().catch(()=>{})}
+function playNote(frequency,duration=.18,volume=.06){if(!audioCtx||audioCtx.state!=="running")return;const osc=audioCtx.createOscillator(),gain=audioCtx.createGain();osc.type="triangle";osc.frequency.setValueAtTime(frequency,audioCtx.currentTime);gain.gain.setValueAtTime(volume,audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+duration);osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+duration)}
+function startMusic(){stopMusic();musicTimer=setInterval(()=>{if(state!=="playing")return;playNote(melody[noteIndex],.18,.045);noteIndex=(noteIndex+1)%melody.length},200)}
+function stopMusic(){if(musicTimer!==null){clearInterval(musicTimer);musicTimer=null}}
+function playExplosion(){if(!audioCtx||audioCtx.state!=="running")return;const osc=audioCtx.createOscillator(),gain=audioCtx.createGain();osc.type="sawtooth";osc.frequency.setValueAtTime(180,audioCtx.currentTime);osc.frequency.exponentialRampToValueAtTime(40,audioCtx.currentTime+.5);gain.gain.setValueAtTime(.2,audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+.5);osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+.5)}
+function updateButtons(){const playing=state==="playing",paused=state==="paused",over=state==="over",menu=state==="menu";startBtn.hidden=!menu;pauseBtn.hidden=!(playing||paused);restartBtn.hidden=!(playing||paused||over);leftBtn.hidden=!(playing||paused);rightBtn.hidden=!(playing||paused);pauseBtn.textContent=paused?"RESUME":"PAUSE"}
+function startGame(){if(state!=="menu")return;initAudio();resetValues();state="playing";updateButtons();startMusic()}
+function togglePause(){if(state==="playing"){state="paused";keys.left=false;keys.right=false;stopMusic()}else if(state==="paused"){state="playing";initAudio();startMusic()}else return;updateButtons()}
+function resetValues(){score=0;obstacles=[];spawnTimer=0;spawnInterval=38;obstacleSpeed=4.2;player.x=WIDTH/2-player.width/2;keys.left=false;keys.right=false;scoreElement.textContent=score}
+function resetGame(){initAudio();resetValues();state="playing";updateButtons();startMusic()}
+function gameOver(){if(state!=="playing")return;state="over";keys.left=false;keys.right=false;stopMusic();playExplosion();if(score>highScore){highScore=score;highScoreElement.textContent=score;try{localStorage.setItem("spaceEvasionHighScore",String(highScore))}catch(error){}}updateButtons()}
+function spawnObstacle(){const size=Math.random()*25+22;obstacles.push({x:Math.random()*(WIDTH-size),y:-size,width:size,height:size,rotation:Math.random()*Math.PI,rotSpeed:(Math.random()-.5)*.05})}
+function checkCollision(a,b){const inset=5;return a.x+inset<b.x+b.width-inset&&a.x+a.width-inset>b.x+inset&&a.y+inset<b.y+b.height-inset&&a.y+a.height-inset>b.y+inset}
+function updateGame(){if(state!=="playing")return;if(keys.left)player.x-=player.speed;if(keys.right)player.x+=player.speed;player.x=Math.max(0,Math.min(WIDTH-player.width,player.x));spawnTimer++;if(spawnTimer>=spawnInterval){spawnObstacle();spawnTimer=0}for(let i=obstacles.length-1;i>=0;i--){const o=obstacles[i];o.y+=obstacleSpeed;o.rotation+=o.rotSpeed;if(checkCollision(player,o)){gameOver();return}if(o.y>HEIGHT){obstacles.splice(i,1);score++;scoreElement.textContent=score;if(score%10===0){obstacleSpeed+=.25;spawnInterval=Math.max(15,spawnInterval-2)}}}}
+function drawStars(move){ctx.strokeStyle="rgba(255,255,255,.45)";ctx.lineWidth=1.5;for(const star of stars){if(move)star.y+=star.speed*(state==="playing"?1:.4);if(star.y>HEIGHT){star.y=0;star.x=Math.random()*WIDTH}ctx.beginPath();ctx.moveTo(star.x,star.y);ctx.lineTo(star.x,star.y-star.size*2);ctx.stroke()}}
+function drawPlayer(){ctx.save();ctx.shadowBlur=14;ctx.shadowColor="#00ffff";ctx.fillStyle="#00ffff";ctx.beginPath();ctx.moveTo(player.x+player.width/2,player.y);ctx.lineTo(player.x+player.width,player.y+player.height);ctx.lineTo(player.x+player.width/2,player.y+player.height-8);ctx.lineTo(player.x,player.y+player.height);ctx.closePath();ctx.fill();ctx.shadowColor="#ffaa00";ctx.fillStyle="#ffaa00";ctx.fillRect(player.x+player.width/2-4,player.y+player.height-3,8,7);ctx.restore()}
+function drawObstacles(){for(const o of obstacles){ctx.save();ctx.translate(o.x+o.width/2,o.y+o.height/2);ctx.rotate(o.rotation);ctx.shadowBlur=10;ctx.shadowColor="#ff3366";ctx.fillStyle="#ff3366";ctx.beginPath();ctx.moveTo(0,-o.height/2);ctx.lineTo(o.width/2,0);ctx.lineTo(0,o.height/2);ctx.lineTo(-o.width/2,0);ctx.closePath();ctx.fill();ctx.shadowBlur=0;ctx.strokeStyle="#fff";ctx.lineWidth=1.5;ctx.stroke();ctx.restore()}}
+function drawOverlay(title,subtitle,color){ctx.fillStyle="rgba(4,4,18,.78)";ctx.fillRect(0,0,WIDTH,HEIGHT);ctx.textAlign="center";ctx.shadowBlur=16;ctx.shadowColor=color;ctx.fillStyle=color;ctx.font="bold 29px Courier New";ctx.fillText(title,WIDTH/2,HEIGHT/2-20);ctx.shadowBlur=0;ctx.fillStyle="#fff";ctx.font="15px Courier New";ctx.fillText(subtitle,WIDTH/2,HEIGHT/2+25)}
+function gameLoop(){ctx.clearRect(0,0,WIDTH,HEIGHT);drawStars(state!=="over");if(state==="playing"){updateGame();drawObstacles();drawPlayer()}else if(state==="menu"){drawOverlay("SYSTEMS ONLINE","Press START GAME to Launch","#00ffff")}else if(state==="paused"){drawObstacles();drawPlayer();drawOverlay("SYSTEMS PAUSED","Tap RESUME or press P to return","#ffaa00")}else if(state==="over"){drawObstacles();drawPlayer();drawOverlay("CRITICAL FAILURE","ENTER or RESTART to revive","#ff3366")}requestAnimationFrame(gameLoop)}
+window.addEventListener("keydown",event=>{if(["ArrowLeft","ArrowRight"," "].includes(event.key))event.preventDefault();if(event.code==="ArrowLeft"||event.code==="KeyA"){if(state==="playing")keys.left=true}if(event.code==="ArrowRight"||event.code==="KeyD"){if(state==="playing")keys.right=true}if(event.code==="KeyP"&&(state==="playing"||state==="paused"))togglePause();if(event.code==="Enter"&&state==="over")resetGame()});
+window.addEventListener("keyup",event=>{if(event.code==="ArrowLeft"||event.code==="KeyA")keys.left=false;if(event.code==="ArrowRight"||event.code==="KeyD")keys.right=false});
+window.addEventListener("blur",()=>{keys.left=false;keys.right=false});
+function setupMovementButton(button,direction){const press=e=>{e.preventDefault();if(state!=="playing")return;keys[direction]=true;if(button.setPointerCapture)button.setPointerCapture(e.pointerId)};const release=e=>{e.preventDefault();keys[direction]=false};button.addEventListener("pointerdown",press);button.addEventListener("pointerup",release);button.addEventListener("pointercancel",release);button.addEventListener("lostpointercapture",()=>{keys[direction]=false})}
+setupMovementButton(leftBtn,"left");setupMovementButton(rightBtn,"right");
+startBtn.addEventListener("click",startGame);pauseBtn.addEventListener("click",togglePause);restartBtn.addEventListener("click",resetGame);
+updateButtons();gameLoop();
+</script>
+</body>
+</html>
